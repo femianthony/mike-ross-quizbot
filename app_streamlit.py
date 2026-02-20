@@ -1,6 +1,8 @@
 import io
+import json
 import os
 from datetime import date
+from pathlib import Path
 
 import streamlit as st
 from openai import OpenAI
@@ -22,10 +24,16 @@ st.markdown(
       [data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecoration"] {visibility: hidden; height: 0;}
       .pill {display:inline-block;padding:4px 10px;border-radius:999px;background:#1a2a4a;border:1px solid rgba(140,170,255,.25);color:#a7c0ff;font-size:12px;}
       .muted {color:#9fb0d8;}
+      .card {border:1px solid rgba(160,190,255,.2);border-radius:14px;padding:14px;background:rgba(11,18,34,.55);}
+      @media (max-width: 900px) {
+        .block-container {padding-top: 1.2rem; padding-left: 0.7rem; padding-right: 0.7rem;}
+      }
     </style>
     """,
     unsafe_allow_html=True,
 )
+
+PROJECTS_PATH = Path(__file__).with_name("projects.json")
 
 DEFAULTS = {
     "questions": [],
@@ -42,6 +50,50 @@ DEFAULTS = {
 for k, v in DEFAULTS.items():
     if k not in st.session_state:
         st.session_state[k] = v
+
+
+def load_projects():
+    if PROJECTS_PATH.exists():
+        try:
+            data = json.loads(PROJECTS_PATH.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                return data
+        except Exception:
+            pass
+    return []
+
+
+def save_projects():
+    PROJECTS_PATH.write_text(json.dumps(st.session_state.projects, indent=2), encoding="utf-8")
+
+
+def export_results_json() -> str:
+    payload = {
+        "mode": st.session_state.mode,
+        "questions": [q.__dict__ for q in st.session_state.questions],
+        "results": st.session_state.results,
+    }
+    return json.dumps(payload, indent=2)
+
+
+def export_results_markdown() -> str:
+    rows = st.session_state.results
+    if not rows:
+        return "# Quiz Results\n\nNo results yet."
+    pts = sum(r["points_awarded"] for r in rows)
+    max_pts = sum(r["max_points"] for r in rows)
+    pct = (pts / max_pts * 100) if max_pts else 0
+    lines = [f"# Quiz Results", "", f"**Score:** {pts:.2f}/{max_pts:.2f} ({pct:.1f}%)", ""]
+    for r in rows:
+        lines.extend(
+            [
+                f"## Q{r['question_id']} — {r['credit_label'].upper()} ({r['points_awarded']}/{r['max_points']})",
+                f"- Reasoning: {r.get('reasoning','')}",
+                f"- Tip: {r.get('improvement_tip','')}",
+                "",
+            ]
+        )
+    return "\n".join(lines)
 
 
 def get_client():
@@ -141,6 +193,9 @@ def reset_quiz_state():
     st.session_state.test_answers = {}
 
 
+if not st.session_state.projects:
+    st.session_state.projects = load_projects()
+
 # ---------- sidebar ----------
 with st.sidebar:
     st.markdown("## Control")
@@ -156,10 +211,15 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("## Status")
     st.markdown(f"<span class='pill'>Quiz: {done}/{total}</span>", unsafe_allow_html=True)
+    if total:
+        st.progress(min(done / total, 1.0))
     st.caption(f"Mode: {mode}")
 
 st.title("Mike Ross QuizBot")
-st.markdown("<span class='muted'>Now with Projects, file upload, and smarter study workflows.</span>", unsafe_allow_html=True)
+st.markdown("<span class='muted'>Practice like finals week. Grade like a strict TA. Improve like a coach.</span>", unsafe_allow_html=True)
+
+if not st.session_state.source.strip() and not st.session_state.questions:
+    st.info("👋 Quick start: upload notes or paste study info, then click **Generate Test**.")
 
 main_tab, projects_tab, planner_tab = st.tabs(["Quiz", "Projects", "Study Planner"])
 
@@ -207,11 +267,14 @@ with main_tab:
             else:
                 with st.spinner("Generating questions..."):
                     client = get_client()
-                    st.session_state.questions = build_quiz(client, model, source, num_questions)
-                    st.session_state.idx = 0
-                    st.session_state.results = []
-                    st.session_state.test_answers = {}
-                    st.session_state.feedback = "Quiz ready."
+                    try:
+                        st.session_state.questions = build_quiz(client, model, source, num_questions)
+                        st.session_state.idx = 0
+                        st.session_state.results = []
+                        st.session_state.test_answers = {}
+                        st.session_state.feedback = "Quiz ready."
+                    except Exception as e:
+                        st.error(f"Could not generate quiz: {e}")
                 st.rerun()
 
         if g2.button("Reset Quiz", use_container_width=True):
@@ -319,6 +382,13 @@ with main_tab:
         st.markdown("### Feedback")
         st.markdown(st.session_state.feedback or "No grading yet.")
 
+        st.markdown("### Export / Share")
+        if st.session_state.results:
+            st.download_button("Download JSON Report", data=export_results_json(), file_name="quiz_report.json", mime="application/json", use_container_width=True)
+            st.download_button("Download Markdown Report", data=export_results_markdown(), file_name="quiz_report.md", mime="text/markdown", use_container_width=True)
+        else:
+            st.caption("Grade at least one answer to unlock exports.")
+
         st.markdown("### Activity")
         if st.session_state.results:
             for r in reversed(st.session_state.results[-10:]):
@@ -348,13 +418,14 @@ with projects_tab:
                     "notes": st.session_state.source,
                 }
             )
+            save_projects()
             st.success("Project saved.")
 
     if st.session_state.projects:
         labels = [f"{p['name']} · {p['course']} · {p['exam']}" for p in st.session_state.projects]
         idx = st.selectbox("Saved projects", range(len(labels)), format_func=lambda i: labels[i])
         p = st.session_state.projects[idx]
-        st.write(p)
+        st.json(p)
         x1, x2 = st.columns(2)
         if x1.button("Load Into Quiz"):
             st.session_state.source = p.get("notes", "")
@@ -362,8 +433,11 @@ with projects_tab:
             st.success("Loaded into quiz source.")
         if x2.button("Delete Project"):
             st.session_state.projects.pop(idx)
+            save_projects()
             st.success("Project deleted.")
             st.rerun()
+    else:
+        st.info("No saved projects yet. Create your first study project to speed up repeat sessions.")
 
 # ---------- STUDY PLANNER TAB ----------
 with planner_tab:

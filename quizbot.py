@@ -2,10 +2,29 @@
 import argparse
 import json
 import os
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from typing import List, Dict, Any
 
 from openai import OpenAI
+
+
+def _clean_list(value: Any, limit: int = 5) -> List[str]:
+    if not isinstance(value, list):
+        return []
+    out = []
+    for item in value[:limit]:
+        text = str(item).strip()
+        if text:
+            out.append(text)
+    return out
+
+
+def _clamp_confidence(value: Any) -> float:
+    try:
+        v = float(value)
+    except Exception:
+        return 0.5
+    return max(0.0, min(1.0, v))
 
 
 @dataclass
@@ -61,22 +80,36 @@ Study material:
         ],
     )
     payload = json.loads(res.choices[0].message.content)
+    raw_questions = payload.get("questions", [])
     questions = []
-    for q in payload.get("questions", []):
+    for idx, q in enumerate(raw_questions, start=1):
+        try:
+            qid = int(q.get("id", idx))
+        except Exception:
+            qid = idx
+        question = str(q.get("question", "")).strip()
+        answer_key = str(q.get("answer_key", "")).strip()
+        rubric = str(q.get("rubric", "")).strip()
+        checklist = _clean_list(q.get("grading_checklist", []), limit=8)
+        if not question or not answer_key:
+            continue
         questions.append(
             QuizQuestion(
-                id=int(q["id"]),
-                question=q["question"].strip(),
-                answer_key=q["answer_key"].strip(),
-                rubric=(
-                    q["rubric"].strip()
-                    + ("\nChecklist: " + ", ".join(q.get("grading_checklist", [])) if q.get("grading_checklist") else "")
-                ),
-                max_points=float(q.get("max_points", 1.0)),
+                id=qid,
+                question=question,
+                answer_key=answer_key,
+                rubric=rubric + ("\nChecklist: " + ", ".join(checklist) if checklist else ""),
+                max_points=max(0.5, float(q.get("max_points", 1.0) or 1.0)),
             )
         )
-    if len(questions) != n:
+
+    if len(questions) < n:
         raise ValueError(f"Expected {n} questions, got {len(questions)}")
+
+    # Keep first n and normalize IDs so UI/state remains stable.
+    questions = questions[:n]
+    for i, q in enumerate(questions, start=1):
+        q.id = i
     return questions
 
 
@@ -142,11 +175,19 @@ Rules:
     else:
         pts = max(0.0, min(max_pts - 1e-6, pts))
 
+    graded["credit_label"] = label if label in {"full", "partial", "none"} else "partial"
     graded["points_awarded"] = round(pts, 3)
     graded["max_points"] = max_pts
     graded["question_id"] = q.id
     graded["question"] = q.question
     graded["answer_key"] = q.answer_key
+    graded["reasoning"] = str(graded.get("reasoning", "")).strip()
+    graded["improvement_tip"] = str(graded.get("improvement_tip", "")).strip()
+    graded["missing"] = _clean_list(graded.get("missing", []), limit=6)
+    graded["what_you_got_right"] = _clean_list(graded.get("what_you_got_right", []), limit=6)
+    graded["missing_concept_hints"] = _clean_list(graded.get("missing_concept_hints", []), limit=6)
+    graded["matched_checklist_items"] = _clean_list(graded.get("matched_checklist_items", []), limit=8)
+    graded["confidence"] = _clamp_confidence(graded.get("confidence", 0.5))
     return graded
 
 
