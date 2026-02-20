@@ -291,7 +291,12 @@ with main_tab:
                     st.write(q.rubric)
 
                 answer = st.text_area("Your answer", key=f"practice_answer_{q.id}", height=170)
-                a1, a2, a3 = st.columns([1, 1, 1.4])
+                a0, a1, a2, a3 = st.columns([1, 1, 1, 1.4])
+
+                if a0.button("Back", use_container_width=True):
+                    if st.session_state.idx > 0:
+                        st.session_state.idx -= 1
+                    st.rerun()
 
                 if a1.button("Submit Answer", use_container_width=True):
                     if not answer.strip():
