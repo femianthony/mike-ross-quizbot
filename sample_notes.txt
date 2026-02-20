@@ -1,0 +1,4 @@
+GDP measures the market value of final goods and services produced within a country in a period.
+Nominal GDP uses current prices; real GDP uses base-year prices.
+GDP deflator = (Nominal GDP / Real GDP) * 100.
+Inflation rate from deflator = (Deflator_t - Deflator_{t-1}) / Deflator_{t-1}.
