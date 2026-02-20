@@ -1,6 +1,8 @@
 import io
 import json
 import os
+import sqlite3
+import hashlib
 from datetime import date
 from pathlib import Path
 
@@ -35,6 +37,7 @@ st.markdown(
 )
 
 PROJECTS_PATH = Path(__file__).with_name("projects.json")
+DB_PATH = Path(__file__).with_name("quizbot_data.db")
 
 DEFAULTS = {
     "questions": [],
@@ -51,13 +54,162 @@ DEFAULTS = {
     "canvas_courses": [],
     "canvas_assignments": [],
     "canvas_selected_course": None,
+    "auth_user": None,
+    "auth_ok": False,
+    "quiz_history": [],
+    "file_library": [],
 }
 for k, v in DEFAULTS.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
+init_db()
+
+
+
+
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY,
+            password_hash TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS projects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS quiz_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            project_name TEXT,
+            mode TEXT,
+            score REAL,
+            max_score REAL,
+            percent REAL,
+            payload TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS file_library (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL,
+            filename TEXT,
+            char_count INTEGER,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def _hash_pw(password: str) -> str:
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
+def create_user(username: str, password: str):
+    if not username or not password:
+        return False, "Username and password required"
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    try:
+        cur.execute("INSERT INTO users(username, password_hash) VALUES(?,?)", (username.strip().lower(), _hash_pw(password)))
+        conn.commit()
+        return True, None
+    except sqlite3.IntegrityError:
+        return False, "Username already exists"
+    finally:
+        conn.close()
+
+
+def verify_user(username: str, password: str) -> bool:
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT password_hash FROM users WHERE username=?", (username.strip().lower(),))
+    row = cur.fetchone()
+    conn.close()
+    return bool(row and row[0] == _hash_pw(password))
+
+
+def load_user_projects(username: str):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT payload FROM projects WHERE username=? ORDER BY id DESC", (username,))
+    rows = cur.fetchall()
+    conn.close()
+    out=[]
+    for r in rows:
+        try:
+            out.append(json.loads(r[0]))
+        except Exception:
+            pass
+    return out
+
+
+def replace_user_projects(username: str, projects: list):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM projects WHERE username=?", (username,))
+    for p in projects:
+        cur.execute("INSERT INTO projects(username,payload) VALUES(?,?)", (username, json.dumps(p)))
+    conn.commit()
+    conn.close()
+
+
+def save_quiz_history(username: str, mode: str, results: list, project_name: str = ""):
+    if not results:
+        return
+    latest = latest_results(results)
+    pts = sum(r.get("points_awarded", 0) for r in latest)
+    max_pts = sum(r.get("max_points", 0) for r in latest)
+    pct = (pts / max_pts * 100) if max_pts else 0
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO quiz_history(username,project_name,mode,score,max_score,percent,payload) VALUES(?,?,?,?,?,?,?)",
+        (username, project_name, mode, pts, max_pts, pct, json.dumps({"results": latest})),
+    )
+    conn.commit()
+    conn.close()
+
+
+def load_quiz_history(username: str, limit: int = 30):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT project_name,mode,score,max_score,percent,created_at FROM quiz_history WHERE username=? ORDER BY id DESC LIMIT ?", (username, limit))
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+
+def save_file_record(username: str, filename: str, char_count: int):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("INSERT INTO file_library(username,filename,char_count) VALUES(?,?,?)", (username, filename, char_count))
+    conn.commit()
+    conn.close()
+
+
+def load_file_library(username: str, limit: int = 50):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT filename,char_count,created_at FROM file_library WHERE username=? ORDER BY id DESC LIMIT ?", (username, limit))
+    rows = cur.fetchall()
+    conn.close()
+    return rows
 
 def load_projects():
+    if st.session_state.get("auth_ok") and st.session_state.get("auth_user"):
+        return load_user_projects(st.session_state["auth_user"])
     if PROJECTS_PATH.exists():
         try:
             data = json.loads(PROJECTS_PATH.read_text(encoding="utf-8"))
@@ -69,7 +221,10 @@ def load_projects():
 
 
 def save_projects():
-    PROJECTS_PATH.write_text(json.dumps(st.session_state.projects, indent=2), encoding="utf-8")
+    if st.session_state.get("auth_ok") and st.session_state.get("auth_user"):
+        replace_user_projects(st.session_state["auth_user"], st.session_state.projects)
+    else:
+        PROJECTS_PATH.write_text(json.dumps(st.session_state.projects, indent=2), encoding="utf-8")
 
 
 def export_results_json() -> str:
@@ -262,6 +417,43 @@ if not st.session_state.projects:
 
 # ---------- sidebar ----------
 with st.sidebar:
+    st.markdown("## Account")
+    if st.session_state.get("auth_ok"):
+        st.success(f"Signed in as @{st.session_state.get('auth_user')}")
+        if st.button("Sign out", use_container_width=True):
+            st.session_state.auth_ok = False
+            st.session_state.auth_user = None
+            st.session_state.projects = []
+            st.session_state.quiz_history = []
+            st.session_state.file_library = []
+            st.rerun()
+    else:
+        login_tab, signup_tab = st.tabs(["Login", "Sign up"])
+        with login_tab:
+            lu = st.text_input("Username", key="login_user")
+            lp = st.text_input("Password", type="password", key="login_pass")
+            if st.button("Login", use_container_width=True):
+                if verify_user(lu, lp):
+                    st.session_state.auth_ok = True
+                    st.session_state.auth_user = lu.strip().lower()
+                    st.session_state.projects = load_user_projects(st.session_state.auth_user)
+                    st.session_state.quiz_history = load_quiz_history(st.session_state.auth_user)
+                    st.session_state.file_library = load_file_library(st.session_state.auth_user)
+                    st.success("Logged in")
+                    st.rerun()
+                else:
+                    st.error("Invalid username/password")
+        with signup_tab:
+            su = st.text_input("New username", key="signup_user")
+            sp = st.text_input("New password", type="password", key="signup_pass")
+            if st.button("Create account", use_container_width=True):
+                ok, err = create_user(su, sp)
+                if ok:
+                    st.success("Account created. Login now.")
+                else:
+                    st.error(err or "Could not create account")
+
+    st.markdown("---")
     st.markdown("## Control")
     model_options = get_model_options()
     default_index = model_options.index("gpt-4o-mini") if "gpt-4o-mini" in model_options else 0
@@ -333,6 +525,10 @@ with main_tab:
                     + ", ".join(loaded_names[:5])
                     + (" ..." if len(loaded_names) > 5 else "")
                 )
+                if st.session_state.get("auth_ok") and st.session_state.get("auth_user"):
+                    for uf in uploaded_files:
+                        save_file_record(st.session_state.auth_user, uf.name, len(st.session_state.source))
+                    st.session_state.file_library = load_file_library(st.session_state.auth_user)
             else:
                 st.warning("Could not extract text from uploaded files.")
 
@@ -548,6 +744,29 @@ with projects_tab:
             st.rerun()
     else:
         st.info("No saved projects yet. Create your first study project to speed up repeat sessions.")
+
+    st.markdown("---")
+    st.markdown("### Account Library")
+    if st.session_state.get("auth_ok") and st.session_state.get("auth_user"):
+        h = st.session_state.get("quiz_history") or []
+        f = st.session_state.get("file_library") or []
+        st.caption("Recent quiz attempts")
+        if h:
+            for row in h[:10]:
+                project_name, mode_h, score, max_score, pct, created_at = row
+                st.write(f"{created_at} · {project_name or 'General'} · {mode_h} · {score:.2f}/{max_score:.2f} ({pct:.1f}%)")
+        else:
+            st.caption("No saved attempts yet")
+
+        st.caption("Recent uploaded files")
+        if f:
+            for row in f[:10]:
+                filename, char_count, created_at = row
+                st.write(f"{created_at} · {filename} · {char_count} chars")
+        else:
+            st.caption("No saved files yet")
+    else:
+        st.info("Create/login to an account to save and view files, projects, and past quiz data.")
 
 # ---------- STUDY PLANNER TAB ----------
 with planner_tab:
