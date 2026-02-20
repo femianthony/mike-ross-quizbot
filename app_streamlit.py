@@ -71,7 +71,8 @@ def export_results_json() -> str:
     payload = {
         "mode": st.session_state.mode,
         "questions": [q.__dict__ for q in st.session_state.questions],
-        "results": st.session_state.results,
+        "results_latest": latest_results(st.session_state.results),
+        "attempt_history": attempts_by_question(st.session_state.results),
     }
     return json.dumps(payload, indent=2)
 
@@ -94,6 +95,23 @@ def export_results_markdown() -> str:
             ]
         )
     return "\n".join(lines)
+
+
+
+
+def attempts_by_question(rows):
+    by_q = {}
+    for r in rows:
+        qid = r.get("question_id")
+        if qid is None:
+            continue
+        by_q.setdefault(qid, []).append(r)
+    return by_q
+
+
+def latest_results(rows):
+    by_q = attempts_by_question(rows)
+    return [by_q[qid][-1] for qid in sorted(by_q.keys())]
 
 
 def get_client():
@@ -207,7 +225,7 @@ with st.sidebar:
     st.session_state.mode = mode
 
     total = len(st.session_state.questions)
-    done = len(st.session_state.results)
+    done = len(latest_results(st.session_state.results))
     st.markdown("---")
     st.markdown("## Status")
     st.markdown(f"<span class='pill'>Quiz: {done}/{total}</span>", unsafe_allow_html=True)
@@ -330,9 +348,10 @@ with main_tab:
                     else:
                         with st.spinner("Building performance summary..."):
                             client = get_client()
-                            summary = summarize(client, model, st.session_state.results)
-                            pts = sum(r["points_awarded"] for r in st.session_state.results)
-                            max_pts = sum(r["max_points"] for r in st.session_state.results)
+                            latest = latest_results(st.session_state.results)
+                            summary = summarize(client, model, latest)
+                            pts = sum(r["points_awarded"] for r in latest)
+                            max_pts = sum(r["max_points"] for r in latest)
                             pct = (pts / max_pts) * 100 if max_pts else 0
                             st.session_state.feedback = f"### Final Score: {pts:.2f}/{max_pts:.2f} ({pct:.1f}%)\n\n{summary}"
                         st.rerun()
@@ -396,8 +415,17 @@ with main_tab:
 
         st.markdown("### Activity")
         if st.session_state.results:
-            for r in reversed(st.session_state.results[-10:]):
-                st.write(f"Q{r['question_id']} · {r['credit_label'].upper()} · {r['points_awarded']}/{r['max_points']}")
+            attempts = attempts_by_question(st.session_state.results)
+            for qid in sorted(attempts.keys(), reverse=True):
+                history = attempts[qid]
+                latest = history[-1]
+                title = f"Q{qid} · {latest['credit_label'].upper()} · {latest['points_awarded']}/{latest['max_points']}"
+                with st.expander(title):
+                    st.caption(f"Tries: {len(history)}")
+                    for i, h in enumerate(history, start=1):
+                        st.write(f"Try {i}: {h['credit_label'].upper()} · {h['points_awarded']}/{h['max_points']}")
+                        if i < len(history):
+                            st.caption(f"Old score kept for history")
         else:
             st.caption("No activity yet")
 
