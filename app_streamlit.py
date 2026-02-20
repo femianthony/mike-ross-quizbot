@@ -169,14 +169,28 @@ with main_tab:
 
     with colA:
         st.markdown("### Build Test")
-        uploaded = st.file_uploader("Upload notes (txt/md/csv/pdf)", type=["txt", "md", "csv", "pdf"])
-        if uploaded:
-            extracted = extract_uploaded_text(uploaded)
-            if extracted.strip():
-                st.session_state.source = extracted
-                st.success(f"Loaded: {uploaded.name}")
+        uploaded_files = st.file_uploader(
+            "Upload notes (txt/md/csv/pdf)",
+            type=["txt", "md", "csv", "pdf"],
+            accept_multiple_files=True,
+        )
+        if uploaded_files:
+            combined = []
+            loaded_names = []
+            for uf in uploaded_files:
+                extracted = extract_uploaded_text(uf)
+                if extracted.strip():
+                    combined.append(f"\n\n===== FILE: {uf.name} =====\n" + extracted)
+                    loaded_names.append(uf.name)
+            if combined:
+                st.session_state.source = "\n".join(combined)
+                st.success(
+                    f"Loaded {len(loaded_names)} file(s): "
+                    + ", ".join(loaded_names[:5])
+                    + (" ..." if len(loaded_names) > 5 else "")
+                )
             else:
-                st.warning("Could not extract text from file.")
+                st.warning("Could not extract text from uploaded files.")
 
         st.session_state.source = st.text_area(
             "Study Information",
