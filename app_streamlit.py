@@ -113,6 +113,42 @@ def init_db():
 init_db()
 
 
+def get_google_user():
+    """Best-effort wrapper for Streamlit OIDC auth when configured."""
+    try:
+        u = getattr(st, "user", None)
+        if u is not None and getattr(u, "is_logged_in", False):
+            return {
+                "id": getattr(u, "sub", None) or getattr(u, "email", None) or getattr(u, "name", None),
+                "email": getattr(u, "email", None),
+                "name": getattr(u, "name", None),
+            }
+    except Exception:
+        pass
+    return None
+
+
+def google_login_available() -> bool:
+    return callable(getattr(st, "login", None)) and callable(getattr(st, "logout", None))
+
+
+def google_login_button():
+    if google_login_available():
+        if st.button("Sign in with Google", use_container_width=True):
+            try:
+                st.login()
+            except Exception as e:
+                st.error(f"Google login failed to start: {e}")
+
+
+def google_logout_button():
+    if google_login_available() and st.button("Sign out Google", use_container_width=True):
+        try:
+            st.logout()
+        except Exception as e:
+            st.error(f"Google logout failed: {e}")
+
+
 def _hash_pw(password: str) -> str:
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
@@ -419,7 +455,20 @@ if not st.session_state.projects:
 # ---------- sidebar ----------
 with st.sidebar:
     st.markdown("## Account")
-    if st.session_state.get("auth_ok"):
+
+    guser = get_google_user()
+    if guser:
+        username = (guser.get("email") or guser.get("id") or "google-user").lower()
+        st.session_state.auth_ok = True
+        st.session_state.auth_user = username
+        if not st.session_state.projects:
+            st.session_state.projects = load_user_projects(username)
+            st.session_state.quiz_history = load_quiz_history(username)
+            st.session_state.file_library = load_file_library(username)
+        st.success(f"Google: {guser.get('email') or guser.get('name') or username}")
+        google_logout_button()
+
+    elif st.session_state.get("auth_ok"):
         st.success(f"Signed in as @{st.session_state.get('auth_user')}")
         if st.button("Sign out", use_container_width=True):
             st.session_state.auth_ok = False
@@ -429,6 +478,9 @@ with st.sidebar:
             st.session_state.file_library = []
             st.rerun()
     else:
+        google_login_button()
+        if not google_login_available():
+            st.caption("Google login requires Streamlit OIDC auth config in secrets.")
         login_tab, signup_tab = st.tabs(["Login", "Sign up"])
         with login_tab:
             lu = st.text_input("Username", key="login_user")
