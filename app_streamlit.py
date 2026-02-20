@@ -4,6 +4,7 @@ import os
 from datetime import date
 from pathlib import Path
 
+import requests
 import streamlit as st
 from openai import OpenAI
 
@@ -47,6 +48,9 @@ DEFAULTS = {
     "active_project": None,
     "study_plan": "",
     "recent_question_stems": [],
+    "canvas_courses": [],
+    "canvas_assignments": [],
+    "canvas_selected_course": None,
 }
 for k, v in DEFAULTS.items():
     if k not in st.session_state:
@@ -114,6 +118,47 @@ def latest_results(rows):
     by_q = attempts_by_question(rows)
     return [by_q[qid][-1] for qid in sorted(by_q.keys())]
 
+
+
+
+def canvas_get(base_url: str, token: str, path: str, params=None):
+    if not base_url or not token:
+        return None, "Missing Canvas URL or token"
+    base = base_url.rstrip("/")
+    url = f"{base}/api/v1/{path.lstrip('/')}"
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        r = requests.get(url, headers=headers, params=params or {}, timeout=20)
+        if r.status_code >= 400:
+            return None, f"Canvas API error {r.status_code}: {r.text[:180]}"
+        return r.json(), None
+    except Exception as e:
+        return None, f"Canvas request failed: {e}"
+
+
+def fetch_canvas_courses(base_url: str, token: str):
+    data, err = canvas_get(base_url, token, "courses", params={"enrollment_state": "active", "per_page": 100})
+    if err:
+        return [], err
+    courses = []
+    for c in data or []:
+        courses.append({"id": c.get("id"), "name": c.get("name") or c.get("course_code") or f"Course {c.get('id')}"})
+    return courses, None
+
+
+def fetch_canvas_assignments(base_url: str, token: str, course_id):
+    data, err = canvas_get(base_url, token, f"courses/{course_id}/assignments", params={"per_page": 100})
+    if err:
+        return [], err
+    out = []
+    for a in data or []:
+        out.append({
+            "id": a.get("id"),
+            "name": a.get("name") or f"Assignment {a.get('id')}",
+            "due_at": a.get("due_at"),
+            "description": (a.get("description") or "").replace("<p>", "").replace("</p>", "\\n"),
+        })
+    return out, None
 
 def get_client():
     key = os.getenv("OPENAI_API_KEY", "")
@@ -225,6 +270,26 @@ with st.sidebar:
     mode = st.radio("Mode", ["Practice", "Test"], index=0 if st.session_state.mode == "Practice" else 1)
     st.session_state.mode = mode
 
+    with st.expander("Canvas", expanded=False):
+        st.session_state.canvas_base = st.text_input(
+            "Canvas URL",
+            value=st.session_state.get("canvas_base") or os.getenv("CANVAS_BASE_URL", ""),
+            placeholder="https://glow.williams.edu",
+        )
+        st.session_state.canvas_token = st.text_input(
+            "Canvas Token",
+            value=st.session_state.get("canvas_token") or os.getenv("CANVAS_API_TOKEN", ""),
+            type="password",
+            placeholder="Paste API token",
+        )
+        if st.button("Load Canvas Courses", use_container_width=True):
+            courses, err = fetch_canvas_courses(st.session_state.canvas_base, st.session_state.canvas_token)
+            if err:
+                st.error(err)
+            else:
+                st.session_state.canvas_courses = courses
+                st.success(f"Loaded {len(courses)} course(s)")
+
     total = len(st.session_state.questions)
     done = len(latest_results(st.session_state.results))
     st.markdown("---")
@@ -240,7 +305,7 @@ st.markdown("<span class='muted'>Practice like finals week. Grade like a strict 
 if not st.session_state.source.strip() and not st.session_state.questions:
     st.info("👋 Quick start: upload notes or paste study info, then click **Generate Test**.")
 
-main_tab, projects_tab, planner_tab = st.tabs(["Quiz", "Projects", "Study Planner"])
+main_tab, projects_tab, planner_tab, canvas_tab = st.tabs(["Quiz", "Projects", "Study Planner", "Canvas"])
 
 # ---------- QUIZ TAB ----------
 with main_tab:
@@ -501,3 +566,56 @@ with planner_tab:
             st.session_state.study_plan = generate_study_plan(model, st.session_state.source, exam_date, objective)
 
     st.markdown(st.session_state.study_plan or "No plan yet.")
+
+
+# ---------- CANVAS TAB ----------
+with canvas_tab:
+    st.markdown("### Canvas Integration")
+    base = st.session_state.get("canvas_base", "")
+    token = st.session_state.get("canvas_token", "")
+    if not base or not token:
+        st.info("Add Canvas URL + token from the sidebar expander first.")
+    else:
+        courses = st.session_state.get("canvas_courses", [])
+        if not courses:
+            st.caption("No courses loaded yet. Click **Load Canvas Courses** in sidebar.")
+        else:
+            course_map = {f"{c['name']} (#{c['id']})": c['id'] for c in courses}
+            course_label = st.selectbox("Course", list(course_map.keys()))
+            course_id = course_map[course_label]
+
+            c1, c2 = st.columns([1,1])
+            if c1.button("Load Assignments", use_container_width=True):
+                assignments, err = fetch_canvas_assignments(base, token, course_id)
+                if err:
+                    st.error(err)
+                else:
+                    st.session_state.canvas_assignments = assignments
+                    st.success(f"Loaded {len(assignments)} assignment(s)")
+            if c2.button("Use Course Name as Project", use_container_width=True):
+                st.session_state.active_project = {"name": course_label, "course": course_label, "exam": "", "objective": "", "notes": st.session_state.source}
+                st.success("Set active project from selected course")
+
+            assignments = st.session_state.get("canvas_assignments", [])
+            if assignments:
+                labels = [f"{a['name']} · due {a['due_at'] or 'n/a'}" for a in assignments]
+                idx = st.selectbox("Assignment", range(len(labels)), format_func=lambda i: labels[i])
+                a = assignments[idx]
+                st.markdown(f"**{a['name']}**")
+                st.caption(f"Due: {a['due_at'] or 'n/a'}")
+                st.text_area("Assignment details", value=a.get("description") or "(No description)", height=180)
+
+                b1, b2 = st.columns([1,1])
+                if b1.button("Load Assignment into Quiz Source", use_container_width=True):
+                    st.session_state.source = (a.get("description") or a.get("name") or "")
+                    st.success("Loaded assignment content into Quiz source.")
+                if b2.button("Add Assignment to Projects", use_container_width=True):
+                    st.session_state.projects.append({
+                        "name": a.get("name") or "Canvas Assignment",
+                        "course": course_label,
+                        "exam": a.get("due_at") or "",
+                        "objective": "Complete assignment with high score",
+                        "notes": a.get("description") or "",
+                    })
+                    save_projects()
+                    st.success("Added assignment to Projects.")
