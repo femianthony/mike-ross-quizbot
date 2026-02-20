@@ -23,7 +23,12 @@ st.set_page_config(page_title="QuizBot AI", page_icon="🧠", layout="wide")
 st.markdown(
     """
     <style>
-      .stApp {background: radial-gradient(1200px 600px at 10% -10%, #1a2440 0%, #0b1222 45%, #070d1a 100%); color: #eaf0ff;}
+      
+      .stApp {
+        background: radial-gradient(1200px 600px at 10% -10%, #1a2440 0%, #0b1222 45%, #070d1a 100%);
+        color: #eaf0ff;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+      }
       [data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecoration"] {visibility: hidden; height: 0;}
       .pill {display:inline-block;padding:4px 10px;border-radius:999px;background:#1a2a4a;border:1px solid rgba(140,170,255,.25);color:#a7c0ff;font-size:12px;}
       .muted {color:#9fb0d8;}
@@ -132,13 +137,26 @@ def google_login_available() -> bool:
     return callable(getattr(st, "login", None)) and callable(getattr(st, "logout", None))
 
 
+def authlib_available() -> bool:
+    try:
+        import authlib  # type: ignore
+        return True
+    except Exception:
+        return False
+
+
 def google_login_button():
-    if google_login_available():
-        if st.button("Sign in with Google", use_container_width=True):
-            try:
-                st.login()
-            except Exception as e:
-                st.error(f"Google login failed to start: {e}")
+    if not google_login_available():
+        st.caption("Google sign-in is not configured on this deployment yet.")
+        return
+    if not authlib_available():
+        st.info("Google sign-in is temporarily unavailable while auth dependencies are updating.")
+        return
+    if st.button("Sign in with Google", use_container_width=True):
+        try:
+            st.login()
+        except Exception:
+            st.error("Google login is currently unavailable. Please use username/password for now.")
 
 
 def google_logout_button():
@@ -480,7 +498,7 @@ with st.sidebar:
     else:
         google_login_button()
         if not google_login_available():
-            st.caption("Google login requires Streamlit OIDC auth config in secrets.")
+            st.caption("Google sign-in requires OIDC config in Streamlit secrets.")
         login_tab, signup_tab = st.tabs(["Login", "Sign up"])
         with login_tab:
             lu = st.text_input("Username", key="login_user")
