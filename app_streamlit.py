@@ -14,7 +14,7 @@ try:
 except Exception:
     PdfReader = None
 
-st.set_page_config(page_title="Mike Ross QuizBot", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="QuizBot AI", page_icon="🧠", layout="wide")
 
 # ---------- style ----------
 st.markdown(
@@ -234,7 +234,7 @@ with st.sidebar:
         st.progress(min(done / total, 1.0))
     st.caption(f"Mode: {mode}")
 
-st.title("Mike Ross QuizBot")
+st.title("QuizBot AI")
 st.markdown("<span class='muted'>Practice like finals week. Grade like a strict TA. Improve like a coach.</span>", unsafe_allow_html=True)
 
 if not st.session_state.source.strip() and not st.session_state.questions:
