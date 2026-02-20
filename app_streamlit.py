@@ -239,10 +239,14 @@ with main_tab:
                             graded = grade_answer(client, model, q, answer)
                             st.session_state.results.append(graded)
                             missing = graded.get("missing") or []
+                            strengths = graded.get("what_you_got_right") or []
+                            hints = graded.get("missing_concept_hints") or []
                             st.session_state.feedback = (
                                 f"**{graded['credit_label'].upper()}** · {graded['points_awarded']}/{graded['max_points']}\n\n"
-                                f"**Why:** {graded.get('reasoning','')}\n\n"
-                                f"**Missing:** {'; '.join(missing) if missing else 'None'}\n\n"
+                                f"**Why (in depth):** {graded.get('reasoning','')}\n\n"
+                                f"**What you got right:** {'; '.join(strengths) if strengths else 'Not enough shown yet'}\n\n"
+                                f"**Missing areas:** {'; '.join(missing) if missing else 'None'}\n\n"
+                                f"**Concept hints (vague):** {'; '.join(hints) if hints else 'N/A'}\n\n"
                                 f"**Tip:** {graded.get('improvement_tip','')}"
                             )
                         st.rerun()
@@ -295,9 +299,14 @@ with main_tab:
                             summary = summarize(client, model, results)
                             comments = []
                             for r in results:
+                                strengths = r.get('what_you_got_right') or []
+                                hints = r.get('missing_concept_hints') or []
                                 comments.append(
                                     f"Q{r['question_id']}: {r['credit_label'].upper()} ({r['points_awarded']}/{r['max_points']})\n"
-                                    f"- Why: {r.get('reasoning','')}\n"
+                                    f"- Why (in depth): {r.get('reasoning','')}\n"
+                                    f"- What you got right: {'; '.join(strengths) if strengths else '—'}\n"
+                                    f"- Missing areas: {'; '.join(r.get('missing') or []) if (r.get('missing') or []) else '—'}\n"
+                                    f"- Concept hints (vague): {'; '.join(hints) if hints else '—'}\n"
                                     f"- Tip: {r.get('improvement_tip','')}"
                                 )
                             st.session_state.feedback = (

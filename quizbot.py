@@ -98,9 +98,11 @@ Return JSON:
 {{
   "credit_label": "full|partial|none",
   "points_awarded": 0.0,
-  "reasoning": "brief reason tied directly to rubric/checklist",
-  "missing": ["key point 1", "key point 2"],
+  "reasoning": "2-4 sentence explanation tied directly to rubric/checklist and what was demonstrated",
+  "missing": ["high-level missing area 1", "high-level missing area 2"],
   "improvement_tip": "one actionable tip",
+  "what_you_got_right": ["high-level strength 1", "high-level strength 2"],
+  "missing_concept_hints": ["vague concept hint 1", "vague concept hint 2"],
   "matched_checklist_items": ["item"],
   "confidence": 0.0
 }}
@@ -109,6 +111,9 @@ Rules:
 - Grade only against what was explicitly asked + rubric/checklist.
 - Never deduct for information that was not requested.
 - If core requested ideas are present but imperfect wording, prefer partial/full (not none).
+- Give richer feedback: reasoning should be 2-4 sentences and educational.
+- missing_concept_hints must be VAGUE (category-level), not exact answer text.
+- what_you_got_right should call out concrete strengths at a high level.
 - full => points_awarded must equal max points.
 - none => points_awarded must be 0.
 - partial => points_awarded > 0 and < max points.
