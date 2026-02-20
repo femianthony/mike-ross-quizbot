@@ -137,26 +137,19 @@ def google_login_available() -> bool:
     return callable(getattr(st, "login", None)) and callable(getattr(st, "logout", None))
 
 
-def authlib_available() -> bool:
-    try:
-        import authlib  # type: ignore
-        return True
-    except Exception:
-        return False
-
-
 def google_login_button():
     if not google_login_available():
         st.caption("Google sign-in is not configured on this deployment yet.")
         return
-    if not authlib_available():
-        st.info("Google sign-in is temporarily unavailable while auth dependencies are updating.")
-        return
     if st.button("Sign in with Google", use_container_width=True):
         try:
             st.login()
-        except Exception:
-            st.error("Google login is currently unavailable. Please use username/password for now.")
+        except Exception as e:
+            msg = str(e)
+            if "Authlib" in msg or "authlib" in msg:
+                st.error("Google login dependency not loaded yet. Reboot app in Streamlit Cloud and retry.")
+            else:
+                st.error("Google login failed to start. Check auth secrets and redirect URI.")
 
 
 def google_logout_button():
