@@ -63,8 +63,6 @@ for k, v in DEFAULTS.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-init_db()
-
 
 
 
@@ -110,6 +108,9 @@ def init_db():
     """)
     conn.commit()
     conn.close()
+
+
+init_db()
 
 
 def _hash_pw(password: str) -> str:
