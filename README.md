@@ -1,64 +1,50 @@
-# AI QuizBot
+# Mike Ross QuizBot
 
-A local CLI tool that:
-1. Takes in study information (text/markdown)
-2. Generates a quiz
-3. Collects your answers
-4. Grades with AI using **full / partial / none** credit
+An AI-powered study assistant that generates short-answer quizzes from your notes, grades with rubric-based feedback, and helps you plan prep for exams.
+
+## Why it feels better now
+
+- **Visible polish:** cleaner dark UI, progress indicator, onboarding hint, mobile-friendly spacing
+- **Reliability upgrades:** safer parsing/normalization for generated questions and graded responses
+- **Grading quality controls:** checklist-aware grading with constrained labels/points and confidence clamp
+- **Project management:** save/load/delete projects with persistent local storage (`projects.json`)
+- **Export/share:** download quiz results as JSON or Markdown reports
+- **Empty states:** helpful prompts when no notes/projects/results exist
 
 ## Quick Start
 
 ```bash
-cd /Users/femi/.openclaw/workspace/quizbot
+cd /Users/femi/.openclaw/workspace/quizbot-deploy
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-Set your OpenAI key:
-
-```bash
 export OPENAI_API_KEY="your_key_here"
-```
-
-Run (CLI):
-
-```bash
-python quizbot.py \
-  --source ./sample_notes.txt \
-  --num-questions 6 \
-  --save-report ./report.json
-```
-
-Run (GUI app - basic Tk):
-
-```bash
-python gui_app.py
-```
-
-Run (Mission-style GUI - recommended):
-
-```bash
 streamlit run app_streamlit.py
 ```
 
-Or double-click:
+## Core Workflows
 
-```bash
-run_mission_gui.command
-```
+1. **Build Quiz**
+   - Upload notes (`txt/md/csv/pdf`) or paste text
+   - Generate Practice or Test mode quizzes
+2. **Get Graded**
+   - Practice: submit one by one
+   - Test: grade all at once
+3. **Improve & Share**
+   - Read targeted feedback + summary
+   - Export results to JSON/Markdown
+4. **Plan Exam Prep**
+   - Generate a study plan from your active project and notes
 
-## What it outputs
+## Files
 
-- Interactive quiz in terminal
-- Per-question scoring:
-  - `full` (1.0)
-  - `partial` (0.5 by default, model can choose 0.25/0.75 too)
-  - `none` (0.0)
-- Final score + feedback on weak areas
-- Optional JSON report
+- `app_streamlit.py` — primary web app
+- `quizbot.py` — quiz generation + grading logic (CLI-compatible)
+- `projects.json` — persisted project list (created automatically)
+- `sample_notes.txt` — starter notes
 
 ## Notes
 
-- Uses `gpt-4o-mini` by default (change with `--model`)
-- If your notes are long, keep to key sections for best quiz quality
+- Default model preference: `gpt-4o-mini`
+- If PDFs fail to parse, install/update `pypdf`
+- Keep source material focused for best question quality
