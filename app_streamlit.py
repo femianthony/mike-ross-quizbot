@@ -46,6 +46,7 @@ DEFAULTS = {
     "projects": [],
     "active_project": None,
     "study_plan": "",
+    "recent_question_stems": [],
 }
 for k, v in DEFAULTS.items():
     if k not in st.session_state:
@@ -286,7 +287,16 @@ with main_tab:
                 with st.spinner("Generating questions..."):
                     client = get_client()
                     try:
-                        st.session_state.questions = build_quiz(client, model, source, num_questions)
+                        st.session_state.questions = build_quiz(
+                            client,
+                            model,
+                            source,
+                            num_questions,
+                            prior_questions=st.session_state.recent_question_stems,
+                        )
+                        # Keep memory of recent tests so next test differs.
+                        stems = [q.question for q in st.session_state.questions]
+                        st.session_state.recent_question_stems = (stems + st.session_state.recent_question_stems)[:60]
                         st.session_state.idx = 0
                         st.session_state.results = []
                         st.session_state.test_answers = {}
@@ -298,6 +308,8 @@ with main_tab:
         if g2.button("Reset Quiz", use_container_width=True):
             reset_quiz_state()
             st.rerun()
+
+        st.caption("New quizzes are diversified against your recent generated tests to reduce repeats.")
 
         if st.session_state.questions:
             if st.session_state.mode == "Practice":

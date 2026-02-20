@@ -41,14 +41,19 @@ def read_source(path: str) -> str:
         return f.read()
 
 
-def build_quiz(client: OpenAI, model: str, source_text: str, n: int) -> List[QuizQuestion]:
+def build_quiz(client: OpenAI, model: str, source_text: str, n: int, prior_questions: List[str] | None = None) -> List[QuizQuestion]:
     system = (
         "You are a college professor writing clear, fair assessments. "
         "Questions and grading criteria must align tightly. Output strict JSON only."
     )
+    prior_block = ""
+    if prior_questions:
+        prior_block = "\nAvoid repeating these recent question stems (same wording or near-duplicate concepts):\n- " + "\n- ".join(prior_questions[:30]) + "\n"
+
     user = f"""
 Create exactly {n} short-answer questions from the study material below.
 Each question must be specific and gradeable from the prompt itself (no hidden requirements).
+{prior_block}
 
 Return JSON with this schema:
 {{
@@ -72,7 +77,7 @@ Study material:
 
     res = client.chat.completions.create(
         model=model,
-        temperature=0.3,
+        temperature=0.55,
         response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": system},
